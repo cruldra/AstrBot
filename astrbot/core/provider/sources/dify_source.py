@@ -60,7 +60,7 @@ class ProviderDify(Provider):
     async def text_chat(
         self,
         prompt: str,
-        session_id: str = None,
+        session_id: str = "astrbot",
         image_urls: List[str] = None,
         func_tool: FuncCall = None,
         contexts: List = None,
