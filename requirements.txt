@@ -41,3 +41,4 @@ nh3
 pydub
 py-cord>=2.6.1
 slack-sdk
+pydub

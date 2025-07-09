@@ -11,7 +11,6 @@ import os
 import sys
 import traceback
 from types import ModuleType
-from typing import List
 
 import yaml
 
@@ -36,12 +35,6 @@ try:
 except ImportError:
     if os.getenv("ASTRBOT_RELOAD", "0") == "1":
         logger.warning("未安装 watchfiles，无法实现插件的热重载。")
-
-try:
-    import nh3
-except ImportError:
-    logger.warning("未安装 nh3 库，无法清理插件 README.md 中的 HTML 标签。")
-    nh3 = None
 
 
 class PluginManager:
@@ -119,7 +112,8 @@ class PluginManager:
                     reloaded_plugins.add(plugin_name)
                     break
 
-    def _get_classes(self, arg: ModuleType):
+    @staticmethod
+    def _get_classes(arg: ModuleType):
         """获取指定模块（可以理解为一个 python 文件）下所有的类"""
         classes = []
         clsmembers = inspect.getmembers(arg, inspect.isclass)
@@ -129,7 +123,8 @@ class PluginManager:
                 break
         return classes
 
-    def _get_modules(self, path):
+    @staticmethod
+    def _get_modules(path):
         modules = []
 
         dirs = os.listdir(path)
@@ -155,7 +150,7 @@ class PluginManager:
                     )
         return modules
 
-    def _get_plugin_modules(self) -> List[dict]:
+    def _get_plugin_modules(self) -> list[dict]:
         plugins = []
         if os.path.exists(self.plugin_store_path):
             plugins.extend(self._get_modules(self.plugin_store_path))
@@ -189,7 +184,8 @@ class PluginManager:
                 except Exception as e:
                     logger.error(f"更新插件 {p} 的依赖失败。Code: {str(e)}")
 
-    def _load_plugin_metadata(self, plugin_path: str, plugin_obj=None) -> StarMetadata:
+    @staticmethod
+    def _load_plugin_metadata(plugin_path: str, plugin_obj=None) -> StarMetadata:
         """v3.4.0 以前的方式载入插件元数据
 
         先寻找 metadata.yaml 文件，如果不存在，则使用插件对象的 info() 函数获取元数据。
@@ -209,6 +205,9 @@ class PluginManager:
             metadata = plugin_obj.info()
 
         if isinstance(metadata, dict):
+            if "desc" not in metadata and "description" in metadata:
+                metadata["desc"] = metadata["description"]
+
             if (
                 "name" not in metadata
                 or "desc" not in metadata
@@ -228,8 +227,9 @@ class PluginManager:
 
         return metadata
 
+    @staticmethod
     def _get_plugin_related_modules(
-        self, plugin_root_dir: str, is_reserved: bool = False
+        plugin_root_dir: str, is_reserved: bool = False
     ) -> list[str]:
         """获取与指定插件相关的所有已加载模块名
 
@@ -435,7 +435,7 @@ class PluginManager:
                         )
 
                 if path in star_map:
-                    # 通过装饰器的方式注册插件
+                    # 通过__init__subclass__注册插件
                     metadata = star_map[path]
 
                     try:
@@ -449,8 +449,10 @@ class PluginManager:
                             metadata.desc = metadata_yaml.desc
                             metadata.version = metadata_yaml.version
                             metadata.repo = metadata_yaml.repo
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.error(
+                            f"插件 {root_dir_name} 元数据载入失败: {str(e)}。使用默认元数据。"
+                        )
                     metadata.config = plugin_config
                     if path not in inactivated_plugins:
                         # 只有没有禁用插件时才实例化插件类
@@ -503,6 +505,8 @@ class PluginManager:
                             )
                         if func_tool.name in inactivated_llm_tools:
                             func_tool.active = False
+
+                    star_registry.append(metadata)
 
                 else:
                     # v3.4.0 以前的方式注册插件
@@ -642,11 +646,10 @@ class PluginManager:
         if not os.path.exists(readme_path):
             readme_path = os.path.join(plugin_path, "readme.md")
 
-        if os.path.exists(readme_path) and nh3:
+        if os.path.exists(readme_path):
             try:
                 with open(readme_path, "r", encoding="utf-8") as f:
                     readme_content = f.read()
-                cleaned_content = nh3.clean(readme_content)
             except Exception as e:
                 logger.warning(f"读取插件 {dir_name} 的 README.md 文件失败: {str(e)}")
 
@@ -654,7 +657,7 @@ class PluginManager:
         if plugin:
             plugin_info = {
                 "repo": plugin.repo,
-                "readme": cleaned_content,
+                "readme": readme_content,
                 "name": plugin.name,
             }
 
@@ -775,7 +778,8 @@ class PluginManager:
 
         plugin.activated = False
 
-    async def _terminate_plugin(self, star_metadata: StarMetadata):
+    @staticmethod
+    async def _terminate_plugin(star_metadata: StarMetadata):
         """终止插件，调用插件的 terminate() 和 __del__() 方法"""
         logger.info(f"正在终止插件 {star_metadata.name} ...")
 

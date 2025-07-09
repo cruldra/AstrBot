@@ -1,12 +1,14 @@
-import traceback
 import asyncio
-from astrbot.core.config.astrbot_config import AstrBotConfig
-from .provider import Provider, STTProvider, TTSProvider, Personality
-from .entities import ProviderType
+import traceback
 from typing import List
-from astrbot.core.db import BaseDatabase
-from .register import provider_cls_map, llm_tools
+
 from astrbot.core import logger, sp
+from astrbot.core.config.astrbot_config import AstrBotConfig
+from astrbot.core.db import BaseDatabase
+
+from .entities import ProviderType
+from .provider import Personality, Provider, STTProvider, TTSProvider
+from .register import llm_tools, provider_cls_map
 
 
 class ProviderManager:
@@ -93,15 +95,15 @@ class ProviderManager:
         """加载的 Text To Speech Provider 的实例"""
         self.embedding_provider_insts: List[Provider] = []
         """加载的 Embedding Provider 的实例"""
-        self.inst_map = {}
+        self.inst_map: dict[str, Provider] = {}
         """Provider 实例映射. key: provider_id, value: Provider 实例"""
         self.llm_tools = llm_tools
 
-        self.curr_provider_inst: Provider = None
+        self.curr_provider_inst: Provider | None = None
         """默认的 Provider 实例"""
-        self.curr_stt_provider_inst: STTProvider = None
+        self.curr_stt_provider_inst: STTProvider | None = None
         """默认的 Speech To Text Provider 实例"""
-        self.curr_tts_provider_inst: TTSProvider = None
+        self.curr_tts_provider_inst: TTSProvider | None = None
         """默认的 Text To Speech Provider 实例"""
         self.db_helper = db_helper
 
@@ -145,21 +147,24 @@ class ProviderManager:
             await self.load_provider(provider_config)
 
         # 设置默认提供商
-        self.curr_provider_inst = self.inst_map.get(
-            self.provider_settings.get("default_provider_id")
+        selected_provider_id = sp.get(
+            "curr_provider", self.provider_settings.get("default_provider_id")
         )
+        selected_stt_provider_id = sp.get(
+            "curr_provider_stt", self.provider_stt_settings.get("provider_id")
+        )
+        selected_tts_provider_id = sp.get(
+            "curr_provider_tts", self.provider_tts_settings.get("provider_id")
+        )
+        self.curr_provider_inst = self.inst_map.get(selected_provider_id)
         if not self.curr_provider_inst and self.provider_insts:
             self.curr_provider_inst = self.provider_insts[0]
 
-        self.curr_stt_provider_inst = self.inst_map.get(
-            self.provider_stt_settings.get("provider_id")
-        )
+        self.curr_stt_provider_inst = self.inst_map.get(selected_stt_provider_id)
         if not self.curr_stt_provider_inst and self.stt_provider_insts:
             self.curr_stt_provider_inst = self.stt_provider_insts[0]
 
-        self.curr_tts_provider_inst = self.inst_map.get(
-            self.provider_tts_settings.get("provider_id")
-        )
+        self.curr_tts_provider_inst = self.inst_map.get(selected_tts_provider_id)
         if not self.curr_tts_provider_inst and self.tts_provider_insts:
             self.curr_tts_provider_inst = self.tts_provider_insts[0]
 
@@ -189,11 +194,6 @@ class ProviderManager:
                 case "anthropic_chat_completion":
                     from .sources.anthropic_source import (
                         ProviderAnthropic as ProviderAnthropic,
-                    )
-                case "llm_tuner":
-                    logger.info("加载 LLM Tuner 工具 ...")
-                    from .sources.llmtuner_source import (
-                        LLMTunerModelLoader as LLMTunerModelLoader,
                     )
                 case "dify":
                     from .sources.dify_source import ProviderDify as ProviderDify
@@ -252,6 +252,10 @@ class ProviderManager:
                 case "volcengine_tts":
                     from .sources.volcengine_tts import (
                         ProviderVolcengineTTS as ProviderVolcengineTTS,
+                    )
+                case "gemini_tts":
+                    from .sources.gemini_tts_source import (
+                        ProviderGeminiTTSAPI as ProviderGeminiTTSAPI,
                     )
                 case "openai_embedding":
                     from .sources.openai_embedding_source import (
@@ -326,8 +330,6 @@ class ProviderManager:
                 inst = provider_metadata.cls_type(
                     provider_config,
                     self.provider_settings,
-                    self.db_helper,
-                    self.provider_settings.get("persistant_history", True),
                     self.selected_default_persona,
                 )
 
@@ -420,7 +422,7 @@ class ProviderManager:
                 self.curr_tts_provider_inst = None
 
             if getattr(self.inst_map[provider_id], "terminate", None):
-                await self.inst_map[provider_id].terminate()
+                await self.inst_map[provider_id].terminate() # type: ignore
 
             logger.info(
                 f"{provider_id} 提供商适配器已终止({len(self.provider_insts)}, {len(self.stt_provider_insts)}, {len(self.tts_provider_insts)})"
@@ -430,6 +432,6 @@ class ProviderManager:
     async def terminate(self):
         for provider_inst in self.provider_insts:
             if hasattr(provider_inst, "terminate"):
-                await provider_inst.terminate()
+                await provider_inst.terminate() # type: ignore
         # 清理 MCP Client 连接
         await self.llm_tools.mcp_service_queue.put({"type": "terminate"})
